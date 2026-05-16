@@ -1,0 +1,42 @@
+kind = "web"
+previewPath = "/"
+title = "AGI Research Lab"
+version = "1.0.0"
+id = "artifacts/research-lab"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18304
+
+[services.development]
+run = "pnpm --filter @workspace/research-lab run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/research-lab", "run", "build" ]
+publicDir = "artifacts/research-lab/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18304"
+BASE_PATH = "/"
+
+[[services]]
+name = "python-api"
+paths = [ "/research", "/ws" ]
+localPort = 8000
+
+[services.development]
+run = "bash artifacts/research-api/start.sh"
+
+[services.env]
+PORT = "8000"

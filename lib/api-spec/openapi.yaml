@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: AGI Research Lab API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: sessions
+    description: Research session management
+  - name: network
+    description: Neural network operations
 paths:
   /healthz:
     get:
@@ -24,6 +28,253 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /sessions:
+    get:
+      operationId: listSessions
+      tags: [sessions]
+      summary: List all research sessions
+      responses:
+        "200":
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ResearchSession"
+    post:
+      operationId: createSession
+      tags: [sessions]
+      summary: Start a new research session
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionInput"
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchSession"
+
+  /sessions/{id}:
+    get:
+      operationId: getSession
+      tags: [sessions]
+      summary: Get a research session by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchSession"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteSession
+      tags: [sessions]
+      summary: Delete a research session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Session deleted
+
+  /sessions/{id}/stop:
+    post:
+      operationId: stopSession
+      tags: [sessions]
+      summary: Stop a running research session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Session stopped
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchSession"
+
+  /sessions/{id}/intervene:
+    post:
+      operationId: humanIntervene
+      tags: [sessions]
+      summary: Human intervention into the agent session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InterventionInput"
+      responses:
+        "200":
+          description: Intervention acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InterventionResult"
+
+  /sessions/{id}/inject-stream:
+    post:
+      operationId: injectDataStream
+      tags: [sessions]
+      summary: Inject a data stream into the running session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataStreamInput"
+      responses:
+        "200":
+          description: Data stream injected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataStreamResult"
+
+  /sessions/{id}/threshold:
+    post:
+      operationId: setThreshold
+      tags: [sessions]
+      summary: Set the perception threshold for the session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ThresholdInput"
+      responses:
+        "200":
+          description: Threshold updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResearchSession"
+
+  /sessions/{id}/network:
+    get:
+      operationId: getNetwork
+      tags: [network]
+      summary: Get the current neural network topology
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Network topology
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkTopology"
+    post:
+      operationId: mutateNetwork
+      tags: [network]
+      summary: Mutate the neural network topology
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkMutationInput"
+      responses:
+        "200":
+          description: Mutation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkTopology"
+
+  /sessions/{id}/metrics:
+    get:
+      operationId: getMetrics
+      tags: [sessions]
+      summary: Get performance metrics history for a session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Metrics history
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsHistory"
+
+  /sessions/{id}/formulas:
+    get:
+      operationId: getFormulas
+      tags: [sessions]
+      summary: Get the currently approved mathematical formulas
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approved formulas
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Formula"
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +285,266 @@ components:
       required:
         - status
 
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    ResearchSession:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        status:
+          type: string
+          enum: [idle, running, paused, completed, error]
+        hypothesis:
+          type: string
+        perceptionThreshold:
+          type: number
+        createdAt:
+          type: string
+        updatedAt:
+          type: string
+        currentIteration:
+          type: integer
+        activeAgents:
+          type: array
+          items:
+            type: string
+      required:
+        - id
+        - name
+        - status
+        - hypothesis
+        - perceptionThreshold
+        - createdAt
+        - updatedAt
+        - currentIteration
+        - activeAgents
+
+    SessionInput:
+      type: object
+      properties:
+        name:
+          type: string
+        hypothesis:
+          type: string
+        perceptionThreshold:
+          type: number
+      required:
+        - name
+        - hypothesis
+
+    InterventionInput:
+      type: object
+      properties:
+        message:
+          type: string
+        type:
+          type: string
+          enum: [directive, question, halt]
+      required:
+        - message
+        - type
+
+    InterventionResult:
+      type: object
+      properties:
+        acknowledged:
+          type: boolean
+        agentResponse:
+          type: string
+      required:
+        - acknowledged
+        - agentResponse
+
+    DataStreamInput:
+      type: object
+      properties:
+        streamType:
+          type: string
+          enum: [normal, drift, ood, adversarial, catastrophic]
+        intensity:
+          type: number
+        label:
+          type: string
+      required:
+        - streamType
+        - intensity
+
+    DataStreamResult:
+      type: object
+      properties:
+        injected:
+          type: boolean
+        streamId:
+          type: string
+        impact:
+          type: string
+      required:
+        - injected
+        - streamId
+        - impact
+
+    ThresholdInput:
+      type: object
+      properties:
+        threshold:
+          type: number
+      required:
+        - threshold
+
+    NetworkNode:
+      type: object
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+          enum: [input, hidden, output, attention, memory]
+        x:
+          type: number
+        y:
+          type: number
+        activation:
+          type: number
+        connections:
+          type: integer
+      required:
+        - id
+        - label
+        - type
+        - x
+        - y
+        - activation
+        - connections
+
+    NetworkEdge:
+      type: object
+      properties:
+        id:
+          type: string
+        source:
+          type: string
+        target:
+          type: string
+        weight:
+          type: number
+        active:
+          type: boolean
+      required:
+        - id
+        - source
+        - target
+        - weight
+        - active
+
+    NetworkTopology:
+      type: object
+      properties:
+        nodes:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkNode"
+        edges:
+          type: array
+          items:
+            $ref: "#/components/schemas/NetworkEdge"
+        totalParams:
+          type: integer
+        depth:
+          type: integer
+      required:
+        - nodes
+        - edges
+        - totalParams
+        - depth
+
+    NetworkMutationInput:
+      type: object
+      properties:
+        action:
+          type: string
+          enum: [add_node, remove_node, add_edge, remove_edge, modify_weight]
+        nodeId:
+          type: ["string", "null"]
+        nodeType:
+          type: ["string", "null"]
+        sourceId:
+          type: ["string", "null"]
+        targetId:
+          type: ["string", "null"]
+        weight:
+          type: ["number", "null"]
+      required:
+        - action
+
+    MetricPoint:
+      type: object
+      properties:
+        iteration:
+          type: integer
+        convergenceSpeed:
+          type: number
+        generalizationIndex:
+          type: number
+        synapticStability:
+          type: number
+        loss:
+          type: number
+        timestamp:
+          type: string
+      required:
+        - iteration
+        - convergenceSpeed
+        - generalizationIndex
+        - synapticStability
+        - loss
+        - timestamp
+
+    MetricsHistory:
+      type: object
+      properties:
+        sessionId:
+          type: string
+        metrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/MetricPoint"
+      required:
+        - sessionId
+        - metrics
+
+    Formula:
+      type: object
+      properties:
+        id:
+          type: string
+        latex:
+          type: string
+        description:
+          type: string
+        proposedBy:
+          type: string
+        status:
+          type: string
+          enum: [proposed, testing, approved, rejected]
+        testScore:
+          type: ["number", "null"]
+        createdAt:
+          type: string
+      required:
+        - id
+        - latex
+        - description
+        - proposedBy
+        - status
+        - createdAt

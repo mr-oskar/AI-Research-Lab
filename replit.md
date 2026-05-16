@@ -1,44 +1,77 @@
-# [Project name]
+# AGI Research Lab
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A real-time multi-agent AGI research platform where three AI scientists (Mathematician, Physicist, Lab Director) collaboratively propose, test, and debate mathematical laws for self-learning algorithms, with live neural network visualization.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/research-lab run dev` — run the React frontend (port 18304)
+- `bash artifacts/research-api/start.sh` — run the Python FastAPI backend (port 8000)
 - `pnpm run typecheck` — full typecheck across all packages
-- `pnpm run build` — typecheck + build all packages
-- `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
-- API: Express 5
-- DB: PostgreSQL + Drizzle ORM
-- Validation: Zod (`zod/v4`), `drizzle-zod`
-- API codegen: Orval (from OpenAPI spec)
-- Build: esbuild (CJS bundle)
+- Frontend: React + Vite + Tailwind CSS (dark theme)
+- Python Backend: FastAPI + WebSockets (uvicorn)
+- Charts: Recharts
+- Neural Network: Canvas API with requestAnimationFrame
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `artifacts/research-lab/src/` — React frontend
+  - `pages/LabPage.tsx` — main page with full lab layout
+  - `components/NeuralNetworkCanvas.tsx` — canvas-based neural network visualizer
+  - `components/AgentDebateTerminal.tsx` — live agent message feed
+  - `components/FormulaPanel.tsx` — mathematical formula cards
+  - `components/AnalyticsHub.tsx` — Recharts metrics dashboard
+  - `components/ControlPanel.tsx` — session control and human intervention
+  - `hooks/useResearchWebSocket.ts` — WebSocket state management
+  - `lib/researchApi.ts` — Python API client (hits /research/*)
+- `artifacts/research-api/` — Python FastAPI backend
+  - `main.py` — API routes and WebSocket handler
+  - `core/research_session.py` — session orchestrator + agent loop
+  - `core/neural_network.py` — mutable network graph model
+  - `core/session_manager.py` — in-memory session registry
+  - `core/websocket_manager.py` — WebSocket connection manager
+  - `agents/mathematician.py` — Δ-Mathematician agent
+  - `agents/physicist.py` — Σ-Physicist agent
+  - `agents/lab_director.py` — Ω-Director agent
+  - `tools/evaluator.py` — formula evaluator
+- `lib/api-spec/` — OpenAPI spec (for Express /api, separate from Python /research)
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- Two separate backends: Express at `/api` (Node.js) and FastAPI at `/research` + `/ws` (Python). Both routed via the Replit reverse proxy using path-based routing in `artifact.toml`.
+- The Python backend uses in-memory storage only — sessions are lost on restart. This is intentional for a research prototype.
+- WebSocket connects at `/ws/{sessionId}` — the proxy routes `/ws` to the Python backend on port 8000.
+- Agent loop starts automatically when a WebSocket client connects to a new idle session.
+- Neural network evolves autonomously each iteration based on performance metrics.
+- Frontend uses direct fetch calls to `/research/*` instead of generated hooks (which target the Express `/api`).
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+- Create named research sessions with a scientific hypothesis
+- Watch 3 AI agents propose formulas, test them, critique each other, and converge on approved mathematical laws
+- Live neural network visualization with pulsing activation animations
+- Real-time analytics (convergence speed, generalization index, synaptic stability, loss)
+- Human intervention: send directives, questions, or halt commands to agents
+- Data stream injection: test network robustness with normal/drift/OOD/adversarial/catastrophic streams
+- Perception threshold slider controls how aggressively the network adapts
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Dark mode only — no toggle
+- Cinematic, mission-control aesthetic — dense information layout
+- Monospace fonts for metrics, formulas, node labels
+- No emojis in UI
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Python binary: `/home/runner/workspace/.pythonlibs/bin/python3` — `python3` is NOT in PATH, must use full path in start.sh
+- WebSocket path `/ws` is proxied to the Python backend — do NOT add this to the React Vite proxy config
+- The `POST /research/sessions/{id}/network` endpoint handles all mutations (add_node, remove_node, etc.) via the `action` field in the request body
+- Session state lives in memory — restarting the Python API loses all sessions
+- Agent loop auto-starts on first WebSocket connect to an idle session
 
 ## Pointers
 
