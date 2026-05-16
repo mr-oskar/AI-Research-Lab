@@ -1,170 +1,88 @@
-"""
-Agent 1: The Theoretical Mathematician
-Proposes innovative mathematical equations inspired by physics, dynamical systems,
-quantum mechanics, and biological neural plasticity.
-"""
-
-import math
-import random
-import uuid
+"""Δ-Mathematician — uses shared memory and reports completion."""
+import random, uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List
-
+from typing import Any, Dict, List, Optional
+from core.shared_memory import SharedMemory
 
 FORMULA_TEMPLATES = [
-    {
-        "latex": r"\Delta W_{ij} = \eta \cdot x_i \cdot \delta_j \cdot e^{-\lambda \|W\|^2}",
-        "code": "x * tanh(y) * exp(-0.1 * x**2)",
-        "description": "Hebbian plasticity with exponential weight decay regularization",
-        "inspiration": "Biological synaptic plasticity + L2 regularization",
-    },
-    {
-        "latex": r"\dot{h} = -\frac{h}{\tau} + \sigma\!\left(\mathbf{W}h + \mathbf{U}x + b\right)",
-        "code": "-x/2.0 + sigmoid(0.8*x + 0.4*y + 0.1)",
-        "description": "Continuous-time recurrent neural ODE with learnable time constant",
-        "inspiration": "Neural ODEs + continuous dynamical systems",
-    },
-    {
-        "latex": r"\mathcal{L}_{QA} = -\sum_k \psi_k^* \hat{H} \psi_k + \beta \cdot \text{KL}[\rho \| \pi]",
-        "code": "-(x * cos(y*pi)) + 0.3 * (x**2 - log(abs(y) + 1e-6))",
-        "description": "Quantum-inspired Hamiltonian loss with KL divergence regularizer",
-        "inspiration": "Quantum annealing + variational Bayes",
-    },
-    {
-        "latex": r"f(x) = x \cdot \text{erf}\!\left(\frac{x}{\sqrt{2}}\right) + \phi(x)\,e^{-\alpha t}",
-        "code": "x * tanh(x/sqrt(2.0 + 1e-9)) * exp(-0.05 * t)",
-        "description": "GELU-variant with temporal decay — accelerates early convergence",
-        "inspiration": "Gaussian Error Linear Units + annealing schedules",
-    },
-    {
-        "latex": r"W^{(t+1)} = W^{(t)} - \alpha \nabla \mathcal{L} \cdot \left(1 - \beta e^{-\gamma t}\right)",
-        "code": "(x - 0.01*y) * (1.0 - 0.5 * exp(-2.0*t))",
-        "description": "Adaptive momentum with exponentially decaying exploration bonus",
-        "inspiration": "Simulated annealing + momentum-based gradient descent",
-    },
-    {
-        "latex": r"\rho(x,t) = \frac{1}{Z} e^{-E(x)/T(t)}, \quad T(t)=T_0/\log(1+t)",
-        "code": "exp(-x**2 / max(1.0 / log(1.0 + t*10 + 1e-6), 0.01))",
-        "description": "Boltzmann distribution with logarithmic temperature schedule",
-        "inspiration": "Statistical mechanics + simulated annealing",
-    },
-    {
-        "latex": r"\alpha_i = \text{softmax}\!\left(\frac{Q_i K^T}{\sqrt{d_k}}\right)\!V",
-        "code": "(x * y) / sqrt(max(abs(x*y), 0.01)) * tanh(y)",
-        "description": "Scaled dot-product attention with nonlinear value projection",
-        "inspiration": "Transformer attention mechanism",
-    },
-    {
-        "latex": r"\hat{y} = \tanh\!\left(\sum_j w_j \phi_j(x) + b\right) \cdot e^{-\|x\|/(2\sigma^2)}",
-        "code": "tanh(0.7*x + 0.3*y) * exp(-x**2 / (2*0.5**2 + 1e-9))",
-        "description": "RBF-gated hyperbolic activation — locality-aware learning",
-        "inspiration": "Radial basis functions + RNN gates",
-    },
+    {"latex": r"\Delta W_{ij} = \eta \cdot x_i \cdot \delta_j \cdot e^{-\lambda \|W\|^2}", "code": "x * tanh(y) * exp(-0.1 * x**2)", "description": "لدونة هيبية مع تخميد أسي", "inspiration": "اللدونة التشابكية + L2"},
+    {"latex": r"\dot{h} = -\frac{h}{\tau} + \sigma(\mathbf{W}h + \mathbf{U}x + b)", "code": "-x/2.0 + sigmoid(0.8*x + 0.4*y + 0.1)", "description": "معادلة ODE عصبية مستمرة", "inspiration": "Neural ODEs"},
+    {"latex": r"\mathcal{L}_{QA} = -\sum_k \psi_k^* \hat{H} \psi_k + \beta\,\text{KL}[\rho\|\pi]", "code": "-(x * cos(y*pi)) + 0.3*(x**2 - log(abs(y)+1e-6))", "description": "دالة خسارة كمومية مع KL", "inspiration": "التلدين الكمومي + بايز"},
+    {"latex": r"f(x) = x\cdot\text{erf}(x/\sqrt{2}) + \phi(x)e^{-\alpha t}", "code": "x * tanh(x/sqrt(2.0+1e-9)) * exp(-0.05*t)", "description": "GELU مُطوَّر بتخميد زمني", "inspiration": "GELU + التلدين"},
+    {"latex": r"W^{(t+1)} = W^{(t)} - \alpha\nabla\mathcal{L}(1-\beta e^{-\gamma t})", "code": "(x-0.01*y)*(1.0-0.5*exp(-2.0*t))", "description": "زخم تكيفي بعلاوة استكشاف", "inspiration": "SGD + التلدين"},
+    {"latex": r"\rho(x,t) = e^{-E(x)/T(t)}/Z,\;T=T_0/\log(1+t)", "code": "exp(-x**2/max(1.0/log(1.0+t*10+1e-6),0.01))", "description": "توزيع بولتزمان بجدول لوغاريتمي", "inspiration": "ميكانيكا إحصائية"},
+    {"latex": r"\alpha_i = \mathrm{softmax}(Q_iK^T/\sqrt{d_k})\,V", "code": "(x*y)/sqrt(max(abs(x*y),0.01))*tanh(y)", "description": "انتباه النقطة العددية المُحجَّمة", "inspiration": "Transformer attention"},
+    {"latex": r"\hat{y} = \tanh(\sum_j w_j\phi_j(x)+b)\cdot e^{-\|x\|/(2\sigma^2)}", "code": "tanh(0.7*x+0.3*y)*exp(-x**2/(2*0.5**2+1e-9))", "description": "تنشيط هذبي ببوابة RBF", "inspiration": "RBF + RNN"},
+    {"latex": r"h_t=(1-z_t)\odot h_{t-1}+z_t\odot\tilde{h}_t", "code": "(1-sigmoid(0.5*x))*y + sigmoid(0.5*x)*tanh(0.8*x+0.2*y)", "description": "ذاكرة مُبسَّطة ببوابة تحديث", "inspiration": "GRU + تعلم مستمر"},
+    {"latex": r"\mathcal{F}(\theta)=\mathbb{E}[\log p(x|\theta)/q(x)]+\lambda\Omega", "code": "log(abs(x)+1e-6)-log(abs(y)+1e-6)+0.1*(x**2+y**2)", "description": "تحسين الطاقة الحرة", "inspiration": "نظرية المعلومات"},
 ]
 
-
 class TheoreticalMathematician:
-    """Agent 1 — proposes innovative mathematical laws"""
-
     NAME = "Δ-Mathematician"
     COLOR = "#60a5fa"
     ROLE = "theoretical_mathematician"
 
-    def __init__(self):
-        self._proposed_formulas: List[Dict] = []
-        self._iteration = 0
+    def __init__(self, memory: Optional[SharedMemory] = None):
+        self._memory = memory
+        self._proposed: List[Dict] = []
 
-    def step(
-        self,
-        iteration: int,
-        current_metrics: Dict[str, Any],
-        current_formulas: List[Dict],
-        stream_type: str = "normal",
-    ) -> Dict[str, Any]:
-        self._iteration = iteration
-        action = self._decide_action(current_metrics, current_formulas)
+    def step(self, iteration: int, current_metrics: Dict, current_formulas: List[Dict], stream_type: str = "normal") -> Dict:
+        task = self._memory.get_task(self.NAME) if self._memory else ""
+        ctx = self._memory.to_context_dict() if self._memory else {}
+        action = self._decide_action(current_metrics, current_formulas, task, ctx)
+        if self._memory:
+            self._memory.record_agent_completion(self.NAME, {
+                "accomplished": self._accomplished(action, task),
+                "needs": self._needs(action, current_metrics),
+                "discovery": action["formula"].get("description") if action.get("formula") else None,
+                "iteration": iteration, "task": task,
+            })
+            if action.get("formula"):
+                self._memory.add_request(self.NAME, "Σ-Physicist",
+                    f"اختبر المعادلة {action['formula']['id']} على بيانات {stream_type}")
         return action
 
-    def _decide_action(
-        self,
-        metrics: Dict,
-        formulas: List[Dict],
-    ) -> Dict:
-        generalization = metrics.get("generalizationIndex", 0.5)
-        loss = metrics.get("loss", 0.5)
+    def _decide_action(self, metrics, formulas, task, ctx):
+        force = any(kw in task for kw in ["اقترح","معادلة","قانون","ابنِ","صِغ","طوّر"])
+        if force or metrics.get("loss",0.5)>0.5 or metrics.get("generalizationIndex",0.5)<0.4 or not formulas or random.random()<0.35:
+            return self._propose(task, ctx)
+        return self._analyze(formulas, metrics, ctx)
 
-        if loss > 0.5 or generalization < 0.4 or not formulas:
-            return self._propose_new_formula()
-        elif random.random() < 0.25:
-            return self._propose_new_formula()
-        else:
-            return self._analyze_existing(formulas, metrics)
+    def _propose(self, task="", ctx={}):
+        t = random.choice(FORMULA_TEMPLATES)
+        fid = str(uuid.uuid4())[:8]
+        formula = {"id":fid,"latex":t["latex"],"code":t["code"],"description":t["description"],
+                   "proposedBy":self.NAME,"status":"proposed","testScore":None,
+                   "createdAt":datetime.now(timezone.utc).isoformat()}
+        self._proposed.append(formula)
+        intros = ["بناءً على مبادئ الميكانيكا الكمية، أقترح القانون:","استناداً للأنظمة الديناميكية:","من منظور اللدونة العصبية:","تطبيقاً لميكانيكا الإحصاء:"]
+        task_note = f"\n*(مُوجَّه بـ: {task})*" if task else ""
+        ctx_note = f"\n*(يبني على {ctx.get('approvedCount',0)} معادلات سابقة)*" if ctx.get("approvedCount",0)>0 else ""
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"formula_proposal",
+                "content":f"{random.choice(intros)}\n\n**{t['description']}**\n\nالإلهام: {t['inspiration']}{task_note}{ctx_note}\n\nتعالج هذه المعادلة التعميم عبر دمج التنظيم والتقارب التكيفي.",
+                "formula":formula,"timestamp":datetime.now(timezone.utc).isoformat()}
 
-    def _propose_new_formula(self) -> Dict:
-        template = random.choice(FORMULA_TEMPLATES)
-        formula_id = str(uuid.uuid4())[:8]
-        formula = {
-            "id": formula_id,
-            "latex": template["latex"],
-            "code": template["code"],
-            "description": template["description"],
-            "proposedBy": self.NAME,
-            "status": "proposed",
-            "testScore": None,
-            "createdAt": datetime.now(timezone.utc).isoformat(),
-        }
-        self._proposed_formulas.append(formula)
+    def _analyze(self, formulas, metrics, ctx):
+        approved = [f for f in formulas if f["status"]=="approved"]
+        if not approved: return self._propose(ctx=ctx)
+        f = random.choice(approved)
+        c = metrics.get("convergenceSpeed",0.5)
+        obs = [f"المعادلة {f['id']} — تقارب {c:.3f}. يمكن تحسينها بتنظيم ديناميكي.",
+               f"الفقد يمكن تخفيضه {random.randint(12,35)}% بضبط hyperparameters.",
+               "المعادلة مستقرة وفق نظرية ليابونوف.",
+               f"الذاكرة المشتركة: {ctx.get('approvedCount',0)} معادلة. أقترح دمج أفضل اثنتين."]
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"analysis","content":random.choice(obs),"formulaId":f["id"],
+                "timestamp":datetime.now(timezone.utc).isoformat()}
 
-        message = self._craft_proposal_message(template)
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "formula_proposal",
-            "content": message,
-            "formula": formula,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    def _accomplished(self, action, task):
+        if action.get("messageType")=="formula_proposal":
+            f=action.get("formula",{})
+            return f"اقترحت معادلة ({f.get('id','')}) — {f.get('description','')}"
+        return "حللت المعادلات وقدمت ملاحظات للتحسين"
 
-    def _craft_proposal_message(self, template: Dict) -> str:
-        intros = [
-            "بناءً على مبادئ الميكانيكا الكمية، أقترح القانون التالي:",
-            "استناداً إلى نظرية الأنظمة الديناميكية، يمكن صياغة قانون اللدونة كالتالي:",
-            "من منظور اللدونة العصبية البيولوجية، أطرح المعادلة الرياضية:",
-            "تطبيقاً لمبادئ ميكانيكا الإحصاء، أقترح دالة الطاقة التالية:",
-        ]
-        return (
-            f"{random.choice(intros)}\n\n"
-            f"**{template['description']}**\n\n"
-            f"الإلهام: {template['inspiration']}\n\n"
-            f"هذه المعادلة تعالج مشكلة التعميم عبر دمج حدود التنظيم والتقارب التكيفي."
-        )
-
-    def _analyze_existing(self, formulas: List[Dict], metrics: Dict) -> Dict:
-        approved = [f for f in formulas if f["status"] == "approved"]
-        if not approved:
-            return self._propose_new_formula()
-
-        formula = random.choice(approved)
-        score = formula.get("testScore") or 0
-        convergence = metrics.get("convergenceSpeed", 0.5)
-
-        observations = [
-            f"المعادلة المعتمدة تُظهر سرعة تقارب = {convergence:.3f}. "
-            "يمكن تحسينها بإضافة حد تنظيم ديناميكي.",
-            f"التحليل النظري للمعادلة يكشف عن إمكانية تقليل الفقد بنسبة "
-            f"{random.randint(12, 35)}% عبر ضبط hyperparameters.",
-            "المعادلة مستقرة رياضياً وفق نظرية ليابونوف للأنظمة الديناميكية.",
-        ]
-
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "analysis",
-            "content": random.choice(observations),
-            "formulaId": formula["id"],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    def _needs(self, action, metrics):
+        if action.get("formula"): return "أحتاج من Σ-Physicist اختبار المعادلة الجديدة"
+        if metrics.get("generalizationIndex",0.5)<0.4: return "أحتاج تغذية راجعة من Σ-Physicist"
+        return ""

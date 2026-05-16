@@ -140,6 +140,26 @@ async function fetchApi<T>(endpoint: string, options: RequestInit = {}): Promise
   return response.json();
 }
 
+export interface UserCommand {
+  command: string;
+  type: 'directive' | 'question' | 'analysis' | 'request';
+}
+
+export interface SharedMemoryContext {
+  hypothesis: string;
+  objective: string;
+  phase: string;
+  iteration: number;
+  approvedCount: number;
+  rejectedCount: number;
+  bestScore: number;
+  keyFindings: string[];
+  openQuestions: string[];
+  userDirectives: string[];
+  streamContext: string;
+  convergenceTrend: number[];
+}
+
 export const researchApi = {
   listSessions: () => fetchApi<ResearchSession[]>('/sessions'),
   createSession: (data: SessionInput) => fetchApi<ResearchSession>('/sessions', { method: 'POST', body: JSON.stringify(data) }),
@@ -147,10 +167,12 @@ export const researchApi = {
   deleteSession: (id: string) => fetchApi<void>(`/sessions/${id}`, { method: 'DELETE' }),
   stopSession: (id: string) => fetchApi<ResearchSession>(`/sessions/${id}/stop`, { method: 'POST' }),
   humanIntervene: (id: string, data: InterventionInput) => fetchApi<InterventionResult>(`/sessions/${id}/intervene`, { method: 'POST', body: JSON.stringify(data) }),
+  sendCommand: (id: string, data: UserCommand) => fetchApi<{ queued: boolean; command: string }>(`/sessions/${id}/command`, { method: 'POST', body: JSON.stringify(data) }),
   injectDataStream: (id: string, data: DataStreamInput) => fetchApi<DataStreamResult>(`/sessions/${id}/inject-stream`, { method: 'POST', body: JSON.stringify(data) }),
   setThreshold: (id: string, data: ThresholdInput) => fetchApi<ResearchSession>(`/sessions/${id}/threshold`, { method: 'POST', body: JSON.stringify(data) }),
   getNetwork: (id: string) => fetchApi<NetworkTopology>(`/sessions/${id}/network`),
   mutateNetwork: (id: string, data: NetworkMutationInput) => fetchApi<NetworkTopology>(`/sessions/${id}/network`, { method: 'POST', body: JSON.stringify(data) }),
   getMetrics: (id: string) => fetchApi<MetricsHistory>(`/sessions/${id}/metrics`),
   getFormulas: (id: string) => fetchApi<Formula[]>(`/sessions/${id}/formulas`),
+  getMemory: (id: string) => fetchApi<SharedMemoryContext>(`/sessions/${id}/memory`),
 };

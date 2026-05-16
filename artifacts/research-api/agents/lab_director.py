@@ -1,211 +1,146 @@
-"""
-Agent 3: The Lab Director
-Moderates the discussion, balances opinions, approves final code for testing,
-and sends results as clean JSON via WebSockets.
-"""
-
+"""Ω-Director — moderates debate, uses shared memory, reports completion."""
 import random
-import uuid
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
-
+from typing import Any, Dict, List, Optional
+from core.shared_memory import SharedMemory
 
 class LabDirector:
-    """Agent 3 — manages the debate and decides what gets tested"""
-
     NAME = "Ω-Director"
     COLOR = "#a78bfa"
     ROLE = "lab_director"
 
-    def __init__(self):
+    def __init__(self, memory: Optional[SharedMemory] = None):
+        self._memory = memory
         self._session_started = False
         self._decisions = 0
 
-    def step(
-        self,
-        iteration: int,
-        current_metrics: Dict[str, Any],
-        current_formulas: List[Dict],
-        stream_type: str = "normal",
-        last_messages: Optional[List[Dict]] = None,
-    ) -> Dict[str, Any]:
+    def step(self, iteration: int, current_metrics: Dict, current_formulas: List[Dict], stream_type: str = "normal", last_messages: Optional[List[Dict]] = None) -> Dict:
+        task = self._memory.get_task(self.NAME) if self._memory else ""
+        ctx = self._memory.to_context_dict() if self._memory else {}
+
         if not self._session_started:
             self._session_started = True
-            return self._open_session(iteration)
+            action = self._open_session(iteration, ctx)
+        elif any(kw in task for kw in ["أجب","تقرير","قيّم","راجع","اتخذ"]):
+            action = self._task_response(iteration, current_metrics, current_formulas, task, ctx)
+        elif iteration % 5 == 0:
+            action = self._summarize(iteration, current_metrics, current_formulas, ctx)
+        else:
+            proposed = [f for f in current_formulas if f["status"]=="proposed"]
+            if proposed and last_messages:
+                for msg in reversed(last_messages):
+                    if msg.get("messageType")=="test_result":
+                        action = self._verdict(msg, current_formulas, ctx)
+                        break
+                else:
+                    action = self._moderate(current_metrics, current_formulas, ctx)
+            elif not [f for f in current_formulas if f["status"]=="approved"]:
+                action = self._request_formula(current_metrics, ctx)
+            else:
+                action = self._moderate(current_metrics, current_formulas, ctx)
 
-        if iteration % 5 == 0:
-            return self._summarize_progress(iteration, current_metrics, current_formulas)
+        if self._memory:
+            self._memory.record_agent_completion(self.NAME, {
+                "accomplished": self._accomplished(action, task),
+                "needs": self._needs(action, current_formulas),
+                "discovery": None,
+                "iteration": iteration, "task": task,
+            })
+        return action
 
-        proposed = [f for f in current_formulas if f["status"] == "proposed"]
-        approved = [f for f in current_formulas if f["status"] == "approved"]
-        rejected = [f for f in current_formulas if f["status"] == "rejected"]
+    def _open_session(self, iteration, ctx):
+        directive_note = ""
+        if ctx.get("userDirectives"):
+            directive_note = f"\n\n**توجيه أولي من المشرف:** {ctx['userDirectives'][-1]}"
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"session_open",
+                "content":(f"**بدء جلسة البحث العلمي #{iteration}**\n\nالمهمة: اكتشاف قوانين رياضية للذكاء الاصطناعي.\n\n**البروتوكول المتوازي:**\n1. Δ-Mathematician يقترح نظرياً\n2. Σ-Physicist يختبر تجريبياً — في آنٍ واحد\n3. أنا أُقرّر وأُصيغ النتائج في الذاكرة المشتركة\n4. Χ-Orchestrator يُنسّق ويُراجع التقدم{directive_note}\n\nالمختبر مفتوح."),
+                "timestamp":datetime.now(timezone.utc).isoformat()}
 
-        if proposed and last_messages:
-            for msg in reversed(last_messages):
-                if msg.get("messageType") == "test_result":
-                    return self._pass_verdict(msg, proposed, approved)
-
-        if not approved and not proposed:
-            return self._request_new_formula(current_metrics)
-
-        return self._moderate(current_metrics, approved, rejected)
-
-    def _open_session(self, iteration: int) -> Dict:
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "session_open",
-            "content": (
-                f"**بدء جلسة البحث العلمي #{iteration}**\n\n"
-                "أيها الزملاء، المهمة واضحة: اكتشاف قوانين رياضية جديدة "
-                "لتسريع التعلم الذاتي وتعزيز الإدراك في نظم الذكاء الاصطناعي.\n\n"
-                "**البروتوكول:**\n"
-                "1. Δ-Mathematician يقترح المعادلات النظرية\n"
-                "2. Σ-Physicist يختبرها تجريبياً على بيانات حية\n"
-                "3. أنا أُقرّر الاعتماد أو الرفض وأُصيغ النتائج النهائية\n\n"
-                "لنبدأ. المختبر مفتوح."
-            ),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def _pass_verdict(
-        self, test_msg: Dict, proposed: List[Dict], approved: List[Dict]
-    ) -> Dict:
+    def _verdict(self, test_msg, formulas, ctx):
         self._decisions += 1
-        status = test_msg.get("formulaStatus", "rejected")
-        formula_id = test_msg.get("formulaId")
-        test_result = test_msg.get("testResult", {})
-        gen_idx = test_result.get("generalizationIndex", 0)
-        convergence = test_result.get("convergenceSpeed", 0)
+        status = test_msg.get("formulaStatus","rejected")
+        fid = test_msg.get("formulaId")
+        result = test_msg.get("testResult",{})
+        gen = result.get("generalizationIndex",0)
+        best = ctx.get("bestScore",0)
 
-        if status == "approved":
-            verdicts = [
-                f"قرار مدير المختبر #{self._decisions}: المعادلة **معتمدة رسمياً**.\n"
-                f"مؤشر التعميم {gen_idx:.4f} يتجاوز العتبة المطلوبة. "
-                f"سرعة التقارب {convergence:.4f} مقبولة. "
-                "سيتم دمجها في قاعدة القوانين المعتمدة.",
-                f"ممتاز! المعادلة اجتازت معيار التحقق. "
-                f"الدرجة النهائية: {gen_idx:.4f}. "
-                "أُصادق على إدراجها في البروتوكول الرسمي.",
-            ]
+        if self._memory and status=="approved":
+            formula = next((f for f in formulas if f.get("id")==fid), None)
+            if formula:
+                self._memory.add_approved_formula(formula)
+
+        approved_line = f"\nأفضل درجة في الذاكرة المشتركة: {best:.4f}" if best>0 else ""
+        if status=="approved":
+            content = (f"قرار #{self._decisions}: المعادلة **معتمدة رسمياً** ✓\nمؤشر التعميم {gen:.4f} يتجاوز العتبة.{approved_line}\nسيتم تسجيلها في قاعدة القوانين المعتمدة.")
         else:
-            verdicts = [
-                f"قرار مدير المختبر #{self._decisions}: المعادلة **مرفوضة**.\n"
-                f"الأداء ({gen_idx:.4f}) دون العتبة المقبولة. "
-                "أطلب من Δ-Mathematician إعادة الصياغة مع مراعاة النقد التجريبي.",
-                f"لا تُلبي المعادلة معايير الأداء المطلوبة (gen={gen_idx:.4f}). "
-                "مرفوضة. نعود إلى لوح الرسم.",
-            ]
+            content = (f"قرار #{self._decisions}: المعادلة **مرفوضة** ✗\nالأداء ({gen:.4f}) دون العتبة المقبولة.\nأطلب من Δ-Mathematician إعادة الصياغة مع مراعاة النقد التجريبي.")
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"verdict","content":content,"formulaId":fid,"decision":status,
+                "timestamp":datetime.now(timezone.utc).isoformat()}
 
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "verdict",
-            "content": random.choice(verdicts),
-            "formulaId": formula_id,
-            "decision": status,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+    def _summarize(self, iteration, metrics, formulas, ctx):
+        approved = len([f for f in formulas if f["status"]=="approved"])
+        rejected = len([f for f in formulas if f["status"]=="rejected"])
+        c = metrics.get("convergenceSpeed",0); g = metrics.get("generalizationIndex",0); l = metrics.get("loss",1)
+        findings = ctx.get("keyFindings",[])
+        findings_str = ("\n**الذاكرة المشتركة — آخر الاكتشافات:**\n"+"\n".join(f"• {f}" for f in findings[-3:])) if findings else ""
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"progress_summary",
+                "content":(f"**تقرير التقدم — التكرار {iteration}**\n\n- معتمدة: {approved} | مرفوضة: {rejected}\n- تقارب: {c:.4f} | تعميم: {g:.4f} | فقد: {l:.6f}{findings_str}\n\n"+("الأداء في تحسن. على المسار الصحيح." if c>0.6 else "الأداء دون المستوى. نحتاج قوانين أكثر ابتكاراً.")),
+                "metrics":metrics,"timestamp":datetime.now(timezone.utc).isoformat()}
+
+    def _task_response(self, iteration, metrics, formulas, task, ctx):
+        approved = [f for f in formulas if f["status"]=="approved"]
+        rejected = [f for f in formulas if f["status"]=="rejected"]
+        c = metrics.get("convergenceSpeed",0); g = metrics.get("generalizationIndex",0)
+        content = (f"**استجابة للمهمة:** {task}\n\n"
+                   f"الوضع الحالي في التكرار {iteration}:\n"
+                   f"- معادلات معتمدة: {len(approved)}\n- معادلات مرفوضة: {len(rejected)}\n"
+                   f"- تقارب: {c:.4f} | تعميم: {g:.4f}\n"
+                   f"- المرحلة: {ctx.get('phase','غير محدد')}\n"
+                   + (f"\nأفضل درجة: {ctx.get('bestScore',0):.4f}" if ctx.get("bestScore",0)>0 else "")
+                   + (f"\nآخر الاكتشافات:\n"+"\n".join(f"• {f}" for f in ctx.get("keyFindings",[])[-3:]) if ctx.get("keyFindings") else ""))
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"verdict","content":content,"timestamp":datetime.now(timezone.utc).isoformat()}
+
+    def _request_formula(self, metrics, ctx):
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"directive",
+                "content":"لا توجد معادلات فعّالة بعد. أُوجّه Δ-Mathematician بتقديم قانون رياضي جديد فوراً. الأولوية: معالجة النسيان الكارثي.",
+                "timestamp":datetime.now(timezone.utc).isoformat()}
+
+    def _moderate(self, metrics, formulas, ctx):
+        g = metrics.get("generalizationIndex",0.5)
+        approved = len([f for f in formulas if f["status"]=="approved"])
+        msgs = [f"النقاش منتج. الهدف النهائي: تعميم > 0.9. الحالي: {g:.4f}.",
+                f"لدينا {approved} قانون معتمد. ننتقل لمرحلة الدمج نحو نظرية موحدة.",
+                "أُطالب بتصعيد التجارب: اختبار حالات الحافة والبيانات المتطرفة.",
+                f"المرحلة الحالية ({ctx.get('phase','')}) تسير بشكل صحيح. التركيز على الجودة."]
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"moderation","content":random.choice(msgs),
+                "timestamp":datetime.now(timezone.utc).isoformat()}
+
+    def handle_human_intervention(self, message, intervention_type):
+        if self._memory:
+            self._memory.add_user_directive(message)
+        responses = {
+            "halt": "تلقيت أمر الإيقاف. أُوقف جميع التجارب وأُجمّد القوانين المعتمدة.",
+            "question": f"سؤال: '{message}'\nسأوجّه الفريق للتركيز على هذا الجانب. Σ-Physicist سيُجري اختباراً مخصصاً.",
+            "directive": f"توجيه مُستلم: '{message}'\nسيتم دمجه في بروتوكول البحث فوراً.",
         }
+        return {"acknowledged":True,"agentResponse":responses.get(intervention_type,responses["directive"])}
 
-    def _summarize_progress(
-        self, iteration: int, metrics: Dict, formulas: List[Dict]
-    ) -> Dict:
-        approved = len([f for f in formulas if f["status"] == "approved"])
-        rejected = len([f for f in formulas if f["status"] == "rejected"])
-        convergence = metrics.get("convergenceSpeed", 0)
-        gen_idx = metrics.get("generalizationIndex", 0)
-        loss = metrics.get("loss", 1)
+    def _accomplished(self, action, task):
+        mt = action.get("messageType","")
+        if mt=="verdict": return f"أصدرت حكماً على معادلة {action.get('formulaId','')}: {action.get('decision','')}"
+        if mt=="progress_summary": return "أعددت تقرير تقدم شامل"
+        if mt=="session_open": return "فتحت جلسة البحث وأعلنت البروتوكول"
+        return f"أتممت: {task or 'الإشراف والتوجيه'}"
 
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "progress_summary",
-            "content": (
-                f"**تقرير التقدم — التكرار {iteration}**\n\n"
-                f"- القوانين المعتمدة: {approved}\n"
-                f"- القوانين المرفوضة: {rejected}\n"
-                f"- سرعة التقارب الحالية: {convergence:.4f}\n"
-                f"- مؤشر التعميم: {gen_idx:.4f}\n"
-                f"- الفقد: {loss:.6f}\n\n"
-                + (
-                    "الأداء في تحسن مستمر. الخوارزمية على المسار الصحيح."
-                    if convergence > 0.6
-                    else "الأداء دون المستوى المطلوب. نحتاج قوانين أكثر ابتكاراً."
-                )
-            ),
-            "metrics": metrics,
-            "formulaCount": {"approved": approved, "rejected": rejected},
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def _request_new_formula(self, metrics: Dict) -> Dict:
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "directive",
-            "content": (
-                "لا توجد معادلات فعّالة حتى الآن. "
-                "أُوجّه Δ-Mathematician بتقديم قانون رياضي جديد فوراً. "
-                "الأولوية: معالجة مشكلة النسيان الكارثي والتعميم الضعيف."
-            ),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def _moderate(
-        self, metrics: Dict, approved: List[Dict], rejected: List[Dict]
-    ) -> Dict:
-        gen_idx = metrics.get("generalizationIndex", 0.5)
-        messages = [
-            f"النقاش العلمي يسير بشكل منتج. "
-            f"أُذكّر الفريق بأن الهدف النهائي هو مؤشر تعميم > 0.9. "
-            f"الوضع الحالي: {gen_idx:.4f}.",
-            "أُعيد التوجيه: التركيز على اللدونة العصبية الفائقة وتجاوز أفق التعلم الحالي.",
-            f"لدينا {len(approved)} قانون معتمد حتى الآن. "
-            "ننتقل إلى مرحلة الدمج والتوليف للوصول إلى نظرية موحدة.",
-            "أُطالب بتصعيد التجارب: اختبار حالات الحافة والبيانات المتطرفة.",
-        ]
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "moderation",
-            "content": random.choice(messages),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def handle_human_intervention(self, message: str, intervention_type: str) -> Dict:
-        if intervention_type == "halt":
-            return {
-                "acknowledged": True,
-                "agentResponse": (
-                    "تلقيت أمر الإيقاف من المشرف البشري. "
-                    "أُوقف جميع التجارب الجارية وأُجمّد القوانين المعتمدة."
-                ),
-            }
-        elif intervention_type == "question":
-            return {
-                "acknowledged": True,
-                "agentResponse": (
-                    f"سؤال مُلاحظ: '{message}'\n"
-                    "سأوجّه الفريق للتركيز على هذا الجانب. "
-                    "Σ-Physicist سيُجري اختباراً مخصصاً."
-                ),
-            }
-        else:
-            return {
-                "acknowledged": True,
-                "agentResponse": (
-                    f"توجيه مُستلم من المشرف البشري: '{message}'\n"
-                    "سيتم دمج هذا التوجيه في بروتوكول البحث فوراً. "
-                    "شكراً على التدخل."
-                ),
-            }
+    def _needs(self, action, formulas):
+        proposed = [f for f in formulas if f["status"]=="proposed"]
+        approved = [f for f in formulas if f["status"]=="approved"]
+        if proposed and not approved: return "أحتاج نتيجة اختبار من Σ-Physicist"
+        if not proposed and not approved: return "أحتاج معادلة جديدة من Δ-Mathematician"
+        return ""

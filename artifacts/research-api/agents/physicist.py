@@ -1,192 +1,144 @@
-"""
-Agent 2: The Experimental Physicist / Critic
-Requests live tests, analyzes loss curves and stability, critiques equations
-that cause slow learning or mathematical collapse.
-"""
-
-import math
+"""Σ-Physicist — tests formulas empirically, uses shared memory, reports completion."""
 import random
 from datetime import datetime, timezone
-from typing import Any, Dict, List
-
+from typing import Any, Dict, List, Optional
 from tools.evaluator import evaluate_formula, generate_dataset
-
+from core.shared_memory import SharedMemory
 
 class ExperimentalPhysicist:
-    """Agent 2 — tests formulas empirically and critiques results"""
-
     NAME = "Σ-Physicist"
     COLOR = "#f59e0b"
     ROLE = "experimental_physicist"
 
-    def __init__(self):
+    def __init__(self, memory: Optional[SharedMemory] = None):
+        self._memory = memory
         self._test_count = 0
-        self._last_test_result: Dict = {}
 
-    def step(
-        self,
-        iteration: int,
-        current_metrics: Dict[str, Any],
-        current_formulas: List[Dict],
-        stream_type: str = "normal",
-    ) -> Dict[str, Any]:
-        proposed = [f for f in current_formulas if f["status"] == "proposed"]
-        approved = [f for f in current_formulas if f["status"] == "approved"]
-        loss = current_metrics.get("loss", 0.5)
-        stability = current_metrics.get("synapticStability", 0.5)
+    def step(self, iteration: int, current_metrics: Dict, current_formulas: List[Dict], stream_type: str = "normal") -> Dict:
+        task = self._memory.get_task(self.NAME) if self._memory else ""
+        ctx = self._memory.to_context_dict() if self._memory else {}
+        requests = self._memory.get_requests_for(self.NAME) if self._memory else []
 
-        if proposed:
-            return self._test_formula(proposed[-1], stream_type)
+        action = self._decide_action(current_metrics, current_formulas, stream_type, task, requests)
+
+        if self._memory:
+            self._memory.record_agent_completion(self.NAME, {
+                "accomplished": self._accomplished(action, task),
+                "needs": self._needs(action, current_formulas),
+                "discovery": self._discovery(action),
+                "iteration": iteration, "task": task,
+            })
+            if action.get("formulaStatus") == "approved":
+                self._memory.add_finding(f"معادلة {action.get('formulaId','')} اجتازت الاختبار بدرجة {action.get('testResult',{}).get('generalizationIndex',0):.4f}")
+                self._memory.add_request(self.NAME, "Ω-Director", f"أصدر حكماً على المعادلة {action.get('formulaId','')}")
+        return action
+
+    def _decide_action(self, metrics, formulas, stream_type, task, requests):
+        proposed = [f for f in formulas if f["status"]=="proposed"]
+        approved = [f for f in formulas if f["status"]=="approved"]
+        loss = metrics.get("loss", 0.5)
+        stability = metrics.get("synapticStability", 0.5)
+
+        force_test = any(kw in task for kw in ["اختبر","فحص","تجربة","test","قيس"])
+        if (force_test or proposed) and (proposed or approved):
+            target = proposed[-1] if proposed else random.choice(approved)
+            return self._test_formula(target, stream_type)
         elif loss > 0.7:
-            return self._critique_collapse(approved, current_metrics)
+            return self._critique_collapse(approved, metrics)
         elif stability < 0.4:
-            return self._critique_instability(approved, current_metrics)
+            return self._critique_instability(metrics)
         elif random.random() < 0.3:
             return self._run_stress_test(approved, stream_type)
-        else:
-            return self._report_analysis(current_metrics)
+        return self._report_analysis(metrics)
 
-    def _test_formula(self, formula: Dict, stream_type: str) -> Dict:
+    def _test_formula(self, formula, stream_type):
         self._test_count += 1
         dataset = generate_dataset(stream_type, n=60)
         code = formula.get("code", "x")
-
         try:
             result = evaluate_formula(code, dataset, stream_type)
             score = result["generalizationIndex"]
             formula["testScore"] = round(score, 4)
             formula["status"] = "approved" if score > 0.45 else "rejected"
         except Exception as e:
-            result = {"error": str(e), "generalizationIndex": 0.0}
-            formula["testScore"] = 0.0
+            result = {"generalizationIndex": 0.0, "loss": 1.0, "error": str(e)}
             formula["status"] = "rejected"
-            score = 0.0
+            formula["testScore"] = 0.0
 
-        verdict = "معتمدة ✓" if formula["status"] == "approved" else "مرفوضة ✗"
+        score = formula["testScore"]
+        status = formula["status"]
+        verdict = "اجتازت" if status == "approved" else "رُفضت"
         content = (
-            f"اختبار التجريبي #{self._test_count} على بيانات **{stream_type}**:\n\n"
-            f"- معامل التعميم: {result.get('generalizationIndex', 0):.4f}\n"
-            f"- سرعة التقارب: {result.get('convergenceSpeed', 0):.4f}\n"
-            f"- الفقد (MSE): {result.get('mse', 1):.6f}\n"
-            f"- الحكم: **{verdict}**\n\n"
-            + (
-                f"المعادلة تُبدي أداءً جيداً. أوصي بالاعتماد."
-                if formula["status"] == "approved"
-                else "انهيار رياضي أو تعميم ضعيف. أطالب بمراجعة نظرية."
-            )
+            f"**نتائج الاختبار التجريبي #{self._test_count}** ({stream_type.upper()})\n\n"
+            f"المعادلة {formula['id']}: **{verdict}**\n"
+            f"- مؤشر التعميم: {score:.4f}\n"
+            f"- الفقد: {result.get('loss',1):.6f}\n"
+            f"- وقت التقييم: {result.get('evaluationTime',0):.1f}ms\n"
+            f"- عينات مختبرة: {result.get('numSamples',0)}\n\n"
+            + ("الأداء مقبول. أُحيل للمدير للقرار النهائي." if status=="approved"
+               else "الأداء دون العتبة. أُوصي بإعادة الصياغة.")
         )
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"test_result","content":content,"formulaId":formula["id"],
+                "formulaStatus":status,"testResult":result,"formula":formula,
+                "timestamp":datetime.now(timezone.utc).isoformat()}
 
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "test_result",
-            "content": content,
-            "testResult": result,
-            "formulaId": formula["id"],
-            "formulaStatus": formula["status"],
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    def _critique_collapse(self, formulas, metrics):
+        loss = metrics.get("loss",1)
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"critique",
+                "content":f"تحذير: الفقد مرتفع جداً ({loss:.4f}). رصدت انهياراً في التقارب.\nالسبب المحتمل: معدل تعلم مرتفع أو معادلة غير مستقرة.\nأُوصي بتفعيل gradient clipping وخفض η بمقدار 50%.",
+                "severity":"high","timestamp":datetime.now(timezone.utc).isoformat()}
 
-    def _critique_collapse(self, formulas: List[Dict], metrics: Dict) -> Dict:
-        loss = metrics.get("loss", 0.5)
-        critiques = [
-            f"تحذير حرج! الفقد = {loss:.4f} يتجاوز العتبة المقبولة. "
-            "المعادلة الحالية تسبب انهياراً في التدرج. "
-            "أطالب بحد تنظيم فوري أو إعادة تهيئة الشبكة.",
-            f"رصدت انفجاراً في التدرجات. القيمة الذاتية الكبرى = {random.uniform(8, 20):.2f}. "
-            "يجب تطبيق gradient clipping أو تعديل معدل التعلم.",
-            "النظام في حالة عدم استقرار رياضي. منحنى الفقد يتباعد لوغاريثمياً. "
-            "أوصي بـ warm restart مع قانون جديد.",
-        ]
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "critique",
-            "content": random.choice(critiques),
-            "severity": "high",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    def _critique_instability(self, metrics):
+        stability = metrics.get("synapticStability",0.5)
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"critique",
+                "content":f"استقرار الروابط العصبية = {stability:.4f} — منخفض جداً.\nرصدت تذبذباً في الأوزان. المعادلة غير مستقرة وفق معيار ليشاتيلييه.\nالحل: تقليل معدل التعلم {random.uniform(0.1,0.5):.2f}x أو إضافة حد تمليس.",
+                "severity":"medium","timestamp":datetime.now(timezone.utc).isoformat()}
 
-    def _critique_instability(self, formulas: List[Dict], metrics: Dict) -> Dict:
-        stability = metrics.get("synapticStability", 0.5)
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "critique",
-            "content": (
-                f"استقرار الروابط العصبية = {stability:.4f} — منخفض جداً.\n"
-                "رصدت تذبذباً في الأوزان بتردد قياسي. "
-                "التجربة تكشف أن المعادلة غير مستقرة بموجب معيار ليشاتيلييه. "
-                f"الحل: تقليل معدل التعلم بمقدار {random.uniform(0.1, 0.5):.2f}x "
-                "أو إضافة حد تمليس."
-            ),
-            "severity": "medium",
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
-
-    def _run_stress_test(self, formulas: List[Dict], stream_type: str) -> Dict:
-        stress_types = ["drift", "ood", "adversarial"]
-        test_type = random.choice(stress_types)
-        dataset = generate_dataset(test_type, n=40)
-        approved = [f for f in formulas if f["status"] == "approved"]
-
-        if not approved:
-            return self._report_analysis({})
-
+    def _run_stress_test(self, formulas, stream_type):
+        test_type = random.choice(["drift","ood","adversarial"])
+        approved = [f for f in formulas if f["status"]=="approved"]
+        if not approved: return self._report_analysis({})
         formula = random.choice(approved)
-        code = formula.get("code", "x")
+        dataset = generate_dataset(test_type, n=40)
         try:
-            result = evaluate_formula(code, dataset, test_type)
+            result = evaluate_formula(formula.get("code","x"), dataset, test_type)
         except Exception:
-            result = {"generalizationIndex": 0.0, "loss": 1.0}
+            result = {"generalizationIndex":0.0,"loss":1.0}
+        gen = result.get("generalizationIndex",0)
+        verdict = "صمدت" if gen>0.4 else "فشلت"
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"stress_test",
+                "content":f"اختبار إجهاد ({test_type.upper()}): المعادلة **{verdict}**\n- تعميم تحت الإجهاد: {gen:.4f}\n- فقد: {result.get('loss',1):.4f}\n"+("مقاومة للنسيان الكارثي." if gen>0.4 else "عرضة للنسيان الكارثي — أوصي بـ EWC."),
+                "stressTestType":test_type,"testResult":result,"timestamp":datetime.now(timezone.utc).isoformat()}
 
-        gen_idx = result.get("generalizationIndex", 0)
-        verdict = "صمدت" if gen_idx > 0.4 else "فشلت"
+    def _report_analysis(self, metrics):
+        c = metrics.get("convergenceSpeed", random.uniform(0.4,0.9))
+        g = metrics.get("generalizationIndex", random.uniform(0.4,0.9))
+        msgs = [f"مراقبة مستمرة: تقارب={c:.3f}، تعميم={g:.3f}. النظام مستقر.",
+                f"تحليل منحنى الفقد: الانحدار لوغاريتمي صحي. ETA: ~{random.randint(15,80)} تكرار.",
+                "التحسن في ارتفاع مستمر. المعادلة تعمل كما هو متوقع نظرياً."]
+        return {"type":"agent_message","agent":self.NAME,"agentRole":self.ROLE,"color":self.COLOR,
+                "messageType":"observation","content":random.choice(msgs),
+                "timestamp":datetime.now(timezone.utc).isoformat()}
 
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "stress_test",
-            "content": (
-                f"اختبار الإجهاد ({test_type.upper()}): "
-                f"المعادلة **{verdict}** أمام بيانات خارج التوزيع.\n"
-                f"- مؤشر التعميم تحت الإجهاد: {gen_idx:.4f}\n"
-                f"- الفقد: {result.get('loss', 1):.4f}\n"
-                + (
-                    "المعادلة مقاومة للنسيان الكارثي."
-                    if gen_idx > 0.4
-                    else "المعادلة عرضة للنسيان الكارثي. تحتاج آلية Elastic Weight Consolidation."
-                )
-            ),
-            "stressTestType": test_type,
-            "testResult": result,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    def _accomplished(self, action, task):
+        mt = action.get("messageType","")
+        if mt=="test_result": return f"اختبرت المعادلة {action.get('formulaId','')} — النتيجة: {action.get('formulaStatus','')}"
+        if mt in ("critique","stress_test"): return "أجريت تحليلاً نقدياً للأداء"
+        return f"نفّذت: {task or 'مراقبة الأداء'}"
 
-    def _report_analysis(self, metrics: Dict) -> Dict:
-        convergence = metrics.get("convergenceSpeed", random.uniform(0.4, 0.9))
-        gen_idx = metrics.get("generalizationIndex", random.uniform(0.4, 0.9))
-        messages = [
-            f"مراقبة مستمرة: سرعة التقارب = {convergence:.3f}، مؤشر التعميم = {gen_idx:.3f}. "
-            "النظام في حالة استقرار. لا تدخل مطلوب.",
-            f"تحليل منحنى الفقد: الانحدار التدريجي يتبع نمطاً لوغاريثمياً صحياً. "
-            f"ETA للتقارب الكامل: ~{random.randint(15, 80)} تكرار.",
-            "رصدت نمط تعلم نشط: التحسن في ارتفاع مستمر. المعادلة تعمل كما هو متوقع نظرياً.",
-        ]
-        return {
-            "type": "agent_message",
-            "agent": self.NAME,
-            "agentRole": self.ROLE,
-            "color": self.COLOR,
-            "messageType": "observation",
-            "content": random.choice(messages),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        }
+    def _needs(self, action, formulas):
+        if action.get("formulaStatus")=="rejected":
+            return "أحتاج من Δ-Mathematician معادلة مُحسَّنة بناءً على نقاط الفشل"
+        proposed = [f for f in formulas if f["status"]=="proposed"]
+        if not proposed: return "أحتاج من Δ-Mathematician معادلة جديدة للاختبار"
+        return ""
+
+    def _discovery(self, action):
+        if action.get("messageType")=="test_result":
+            r = action.get("testResult",{})
+            return f"اختبار تجريبي: gen={r.get('generalizationIndex',0):.4f}, loss={r.get('loss',1):.4f}"
+        return None
